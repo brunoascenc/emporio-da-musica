@@ -12,7 +12,7 @@ Complete one stage at a time: implement, validate, update documentation, and rep
 | 2. Local infrastructure | Complete | FastAPI, settings, dependencies, backend Dockerfile, and Compose with PostgreSQL/pgvector | Nine automated tests pass, both containers are healthy, and the live health endpoint confirms PostgreSQL and pgvector |
 | 3. Tabular ingestion | Complete | Alembic migration, six tables, validated CSV snapshots, and transactional upsert CLI | 26 tests pass, including isolated PostgreSQL tests for types, relationships, repeated imports, updates, and rollback |
 | 4. SQL tools | Complete | Read-only catalog, price, promotion, and protected order services with LangChain tool adapters | Validated filters, bounded results, exact prices, active promotions, and order matching by number and email |
-| 5. Vector retrieval | Pending | PDF ingestion, embeddings, and referenced policy search | Relevant sections retrieved; unchanged sources do not trigger new embeddings |
+| 5. Vector retrieval | Complete | Section-aware PDF ingestion, atomic pgvector indexing, OpenAI embeddings adapter, and referenced policy search | 62 automated tests pass; authorized live indexing, unchanged reimport, and four retrieval checks succeed |
 | 6. Agent | Pending | ReAct, persona, and tool integration | Simple and combined queries, limits, and error handling |
 | 7. Chat and history | Pending | Chat endpoints, sessions, and persistence | Conversations survive restarts and stay isolated by session |
 | 8. Interface | Pending | React/TypeScript frontend using FDD, with a `chat` feature, integrated through Compose | Send, receive, restore, and start conversations; show sources and errors; respect feature public APIs and shared-code boundaries |
@@ -45,3 +45,12 @@ Tests will accompany features. Stage 9 consolidates evaluation rather than postp
 - PostgreSQL tests cover accent-insensitive category/budget search, stock and lifecycle filtering, inactive promotions, selecting one active discount, discounted-price budget boundaries, result limits, literal SQL-like input, and order lookup with matching or incorrect email.
 - Existing migration and ingestion tests continue to cover isolated schemas, data types, upserts, and rollback. All database tests leave operational data untouched.
 - Policy retrieval, payment-policy application, agent orchestration, chat, and frontend implementation remain for later stages.
+
+## Stage 5 validation
+
+- The original policy PDF is copied unchanged into `backend/data/`. Layout extraction produces 25 referenced chunks with page ranges, numbered sections, parent context, and payment-table text.
+- The complete suite passes 62 tests, including local PostgreSQL tests for vector storage, exact retrieval, references, unchanged imports without embedding calls, model changes, and preservation of the previous index on provider or database failure.
+- The vector-table migration is applied to the project database, and Docker containers remain healthy. Automated tests use mocked OpenAI responses or deterministic local vectors in isolated schemas; they do not validate real embedding relevance.
+- After explicit authorization to send the manual text to OpenAI, live indexing stored 25 chunks using the configured embedding model. A repeat import reported `status=unchanged` and `embedded_chunks=0`.
+- Four live retrieval checks returned the expected primary sections: opening hours (`2`), payments (`3.1` and `3`), online returns (`4.1`), and legal warranty (`8.1`). All returned passages include valid source, document hash, section, and page references. This is a smoke evaluation, not a comprehensive retrieval benchmark.
+- Agent orchestration, payment-policy application, conversation APIs, and frontend implementation remain for later stages.

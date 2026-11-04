@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +21,8 @@ class Settings(BaseSettings):
     postgres_db: str = Field(default="emporio", min_length=1)
     postgres_user: str = Field(default="emporio", min_length=1)
     postgres_password: SecretStr = Field(min_length=1)
+    openai_api_key: SecretStr | None = None
+    embedding_model: Literal["text-embedding-3-small", "text-embedding-3-large"] = "text-embedding-3-small"
 
     @property
     def database_url(self) -> URL:

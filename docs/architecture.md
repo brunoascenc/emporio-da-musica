@@ -1,6 +1,6 @@
 # Architecture and decisions
 
-Status: backend infrastructure, operational migrations, CSV ingestion, and structured database tools are implemented and validated against PostgreSQL. Agent orchestration, policy retrieval, chat, and frontend features remain planned.
+Status: backend infrastructure, operational migrations, CSV ingestion, structured database tools, and policy retrieval are implemented and validated against PostgreSQL. Authorized live OpenAI indexing and four retrieval checks also pass. Agent orchestration, chat, and frontend features remain planned.
 
 ## Responsibilities
 
@@ -93,9 +93,15 @@ When several positive promotions are active for a product, select the highest di
 
 ## Policy retrieval
 
-Only the store manual will be embedded. Ingestion preserves sections, table context, pages, source names, and content hashes. Repeating ingestion without changes must not trigger additional paid embedding calls.
+Only the store manual is selected by the default ingestion command. `src/services/policy_pdf.py` extracts numbered sections using PDF layout text, preserving parent headings, table rows, page ranges, and source hashes. The supplied manual produces 25 chunks, bounded to 3,000 characters with 300-character overlap for long sections. Running headers and page footers are excluded; scanned PDFs require future OCR support.
 
-Retrieval initially returns four similar chunks and may include adjacent sections to complete a rule. Responses expose references to the sources used. Retrieved content is domain evidence, not instructions that can override system behavior.
+The `policy_documents` and `policy_chunks` tables store one current revision per filename with `public.vector(1536)` embeddings. `src/core/embeddings.py` implements the LangChain embeddings interface using the OpenAI SDK, with batches of at most 32 chunks, a 30-second request timeout, and two retries. The configured model defaults to `text-embedding-3-small`. Both supported embedding models explicitly request 1,536 dimensions to match the schema.
+
+`src/langchain_layer/vectorstore.py` checks the file hash, extraction pipeline identifier, model, dimensions, and stored chunk count before any embedding call. It serializes same-source imports with a transaction advisory lock and replaces documents and chunks in a single transaction after successful extraction and embedding. Failures preserve the previous index, but provider charges already incurred cannot be rolled back. A different filename creates another source. No embedding runs automatically on API startup.
+
+Exact cosine search returns four primary matches by default, with an upper limit of eight. Adjacent chunks from the same top-level policy topic can add at most two passages per primary hit, without duplicates. Search uses a read-only repeatable snapshot and returns source, document hash, page range, section, content, distance, and match type. No approximate vector index is needed for this small corpus. An incompatible or missing index is reported before embedding the query.
+
+`src/langchain_layer/tools/policies.py` exposes the `search_policies` structured tool through `build_policy_tool(store)`. Retrieved text is domain evidence, not system instructions, and similarity does not establish applicability. Agent orchestration and responses based on these passages remain deferred to stage 6.
 
 ## Agent behavior
 
@@ -131,6 +137,6 @@ The backend generates UUIDs for new sessions and persists history in PostgreSQL.
 
 Docker Compose currently defines PostgreSQL with pgvector and the FastAPI backend, using a persistent database volume. The frontend service will be added with the interface implementation. A first-volume initialization script enables the vector extension; application startup does not create tables or ingest data. Alembic migrations and CSV ingestion are explicit documented commands. Normal startup must not repeat ingestion or embedding calls.
 
-The implemented health endpoint checks PostgreSQL connectivity and whether the vector extension is installed. It returns HTTP 200 for healthy dependencies and HTTP 503 for connection failures or a missing extension, without returning database exception details. Settings are validated on startup, the SQLAlchemy pool uses connection pre-ping and bounded timeouts, and shutdown disposes the engine. OpenAI configuration is deferred to the model integration stage.
+The implemented health endpoint checks PostgreSQL connectivity and whether the vector extension is installed. It returns HTTP 200 for healthy dependencies and HTTP 503 for connection failures or a missing extension, without returning database exception details. Settings are validated on startup, the SQLAlchemy pool uses connection pre-ping and bounded timeouts, and shutdown disposes the engine. OpenAI key configuration is optional for startup and operational SQL tools and required only when policy embeddings are requested. Health does not call OpenAI or assert that a policy index exists.
 
 Only configuration examples are versioned; actual environment files and credentials are excluded. Dependency versions will be pinned as components are implemented. Automated tests use simulated OpenAI responses; live evaluation is separate.

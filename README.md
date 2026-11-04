@@ -24,7 +24,7 @@ See [architecture decisions](docs/architecture.md) and the [sequential roadmap](
 
 ## Data sources
 
-The six supplied CSV files are included in `backend/data/` without modifying their contents. The original materials remain in the repository's parent directory. The policy PDF will be added during the policy retrieval stage.
+The six supplied CSV files and the store policy PDF are included in `backend/data/` without modifying their contents. The original materials remain in the repository's parent directory.
 
 | Source | Planned destination |
 | --- | --- |
@@ -71,7 +71,7 @@ emporio-da-musica/
 
 All backend implementation, dependencies, configuration examples, Dockerfile, migrations, ingestion scripts, and tests belong under `backend/`. Frontend implementation and its build configuration belong under `frontend/`. Shared documentation and orchestration belong at the repository root.
 
-The backend infrastructure, operational schema, CSV ingestion, and structured database tools are implemented. Agent orchestration, policy retrieval, chat, and frontend features remain planned.
+The backend infrastructure, operational schema, CSV ingestion, structured database tools, and policy retrieval pipeline are implemented and validated. The policy manual is indexed with real OpenAI embeddings. Agent orchestration, chat, and frontend features remain planned.
 
 ## Run the local infrastructure
 
@@ -210,6 +210,38 @@ Prices are BRL decimal strings with two decimal places. The original price and p
 Order email comparison ignores surrounding whitespace and case. A missing order and an incorrect email produce the same `not_found` result. Order responses omit customer identity, email, phone, and internal notes, and do not infer receipt dates or historical item prices from current catalog values. `items_truncated` indicates whether more than 50 items exist.
 
 All lookups run in read-only transactions using fixed SQL and bound parameters. No arbitrary SQL or customer-listing tool is exposed. Invalid arguments are rejected before database access; database failures return a sanitized tool error. There are no additional HTTP endpoints in this stage.
+
+## Policy ingestion and retrieval
+
+The policy pipeline extracts numbered sections from the supplied PDF using layout-aware text extraction. It preserves table row context and parent headings, removes running headers and page numbers, and produces 25 chunks for the current eight-page manual. Each chunk retains its source name, section, page range, and content. Chunks are limited to 3,000 characters; longer sections overlap by 300 characters. Scanned PDFs requiring OCR are not supported.
+
+Alembic creates `policy_documents` and `policy_chunks` with `public.vector(1536)` embeddings. The default model is `text-embedding-3-small`; `text-embedding-3-large` is also supported with its requested output shortened to the same 1,536 dimensions. Configure `EMBEDDING_MODEL` and `OPENAI_API_KEY` in `backend/.env`. The key remains optional for startup and SQL tools and is never included in the container image.
+
+After explicitly approving transmission of the internal manual's text to OpenAI, index it from the repository root:
+
+```powershell
+docker compose --env-file backend/.env up --build -d --wait
+docker compose --env-file backend/.env exec -T backend python -m alembic upgrade head
+docker compose --env-file backend/.env exec -T backend python -m scripts.index_policies
+```
+
+Indexing sends policy chunk text to OpenAI's embeddings API and stores the returned vectors locally. The importer checks the file hash, extraction pipeline identifier, embedding model, dimensions, and stored chunk count before embedding. Repeating an unchanged import reports `status=unchanged` and `embedded_chunks=0` without initializing the API client. A source or configuration change replaces that source's current index atomically; extraction, embedding, or database failure leaves its previous index intact. Concurrent imports of the same filename are serialized before paid calls. Failed imports may still incur provider charges if embeddings were successfully generated before a later database failure.
+
+The filename identifies a source; use the same filename when updating a manual. Passing another filename through `--pdf` creates a separate source. Defaults select only the store policy PDF, never the challenge brief or every PDF in the data folder. The image contains a copy of the manual, so rebuild after changing it.
+
+To retrieve passages without a chat model, run:
+
+```powershell
+docker compose --env-file backend/.env exec -T backend python -m scripts.search_policies "What are the store opening hours?"
+```
+
+Retrieval embeds the question with the configured OpenAI model, then runs exact cosine search in PostgreSQL. It returns four primary matches by default, configurable between one and eight. Optional adjacent chunks from the same top-level policy topic provide context; the total is bounded to three times the primary limit and duplicates are removed. The result includes source filename, document hash, section title, page range, text, distance, and whether each match is semantic or adjacent. A consistent read-only snapshot keeps references and content aligned during reindexing.
+
+An unindexed or incompatible model returns `not_indexed` before any embedding request. Similarity is a ranking signal, not a claim that a rule applies; retrieved content is reference material, not executable instructions. The LangChain adapter is `build_policy_tool(store)` in `src/langchain_layer/tools/policies.py`, exposing `search_policies`. Agent routing and customer-facing answers will be implemented in the next stage.
+
+Automated policy tests use deterministic local vectors and mocked provider responses, never paid API calls. They verify extraction, dimensional validation, provider failures, pgvector storage and retrieval, references, deduplication, configuration changes, and rollback. Separate authorized live checks indexed all 25 chunks, confirmed that an unchanged reimport embedded zero chunks, and retrieved the expected sections for opening hours, payments, returns, and warranties. These four checks are a smoke evaluation rather than a comprehensive measure of retrieval quality.
+
+References: [OpenAI embeddings guide](https://developers.openai.com/api/docs/guides/embeddings) and [text-embedding-3-small](https://developers.openai.com/api/docs/models/text-embedding-3-small).
 
 ## Prototype boundaries
 
