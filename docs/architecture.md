@@ -1,6 +1,6 @@
 # Architecture and decisions
 
-Status: backend infrastructure, operational migrations, and CSV ingestion are implemented and validated against PostgreSQL. Agent, policy retrieval, chat, and frontend features remain planned.
+Status: backend infrastructure, operational migrations, CSV ingestion, and structured database tools are implemented and validated against PostgreSQL. Agent orchestration, policy retrieval, chat, and frontend features remain planned.
 
 ## Responsibilities
 
@@ -77,6 +77,19 @@ The initial Alembic migration creates all six tables. Source identifiers are ext
 - The backend validates the order number and matching email before returning information. Logs must not record these personal identifiers.
 
 CSV parsing and validation live in `backend/src/services/ingestion.py` and `ingestion_schemas.py`; `backend/scripts/import_data.py` exposes the explicit CLI command. The six original CSVs are included under `backend/data/`. All files are validated before writes, including duplicate keys and references within the supplied snapshot. A single transaction performs PostgreSQL upserts in dependency order. Existing keys are updated, absent keys are retained, and any database failure rolls back every table. Diagnostics identify the file, record, and invalid fields without exposing field values. The JSON success report counts processed source rows rather than new inserts.
+
+## Operational lookup tools
+
+`src/services/store_queries.py` owns fixed parameterized SQL and structured results. `src/services/store_schemas.py` validates lookup arguments. `src/langchain_layer/tools/` adapts these services into LangChain structured tools through `build_store_tools(engine)` without initializing an LLM.
+
+- `list_categories` returns up to 100 category descriptions and IDs.
+- `search_products` filters by literal name/description/category substring, category ID, discounted unit-price budget, and availability. Search ignores case and common Portuguese accents. Return five products by default, at most 20, plus `has_more`; sort by current price and product ID.
+- `get_product` returns price, active promotion, availability, lifecycle status, and specifications by product ID. Unavailable products can be inspected without implying they can be purchased.
+- `get_order` requires both order number and matching email. Return only the matched order and up to 50 items, with `items_truncated`. Email comparison ignores case and surrounding whitespace. Missing order and mismatched email share the same not-found result; customer identifiers and internal notes are omitted.
+
+Queries run inside read-only transactions. Only predefined statements and bound parameters are exposed; errors do not include SQL, database details, or customer values. Input validation occurs before database access.
+
+When several positive promotions are active for a product, select the highest discount, breaking ties by promotion ID. Inactive discounts are ignored and promotions are not stacked. Return original price, selected promotion, and current unit price as decimal strings. Budget comparison and price ordering use exact PostgreSQL numeric arithmetic with the same half-up cent rounding used by Python `Decimal` when formatting responses. PIX and installment conditions remain deferred until policy retrieval and agent orchestration are available.
 
 ## Policy retrieval
 

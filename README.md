@@ -71,7 +71,7 @@ emporio-da-musica/
 
 All backend implementation, dependencies, configuration examples, Dockerfile, migrations, ingestion scripts, and tests belong under `backend/`. Frontend implementation and its build configuration belong under `frontend/`. Shared documentation and orchestration belong at the repository root.
 
-The backend infrastructure, operational schema, and CSV ingestion are implemented. Agent, policy retrieval, chat, and frontend features remain planned.
+The backend infrastructure, operational schema, CSV ingestion, and structured database tools are implemented. Agent orchestration, policy retrieval, chat, and frontend features remain planned.
 
 ## Run the local infrastructure
 
@@ -171,6 +171,45 @@ try {
 ```
 
 Integration tests create and remove uniquely named temporary schemas in the configured database, leaving operational tables untouched. They verify migration repeatability, typed data, relationships, repeated imports, updates, and rollback after a late database failure. The database user needs permission to create schemas. No OpenAI calls are made.
+
+## Operational agent tools
+
+`backend/src/langchain_layer/tools/` exposes `build_store_tools(engine)`, which builds four LangChain structured tools with validated input schemas. The SQL and result formatting live in `backend/src/services/store_queries.py`. No model or OpenAI key is required to invoke these tools.
+
+| Tool | Inputs | Behavior |
+| --- | --- | --- |
+| `list_categories` | None | Return category IDs, names, and descriptions, bounded to 100 categories |
+| `search_products` | Optional `query`, `category_id`, `max_price_brl`, `only_available`, `limit` | Search name, description, and category; default to available products and five results, with a maximum of 20 |
+| `get_product` | `product_id` | Return current price, selected promotion, specifications, stock, and lifecycle status |
+| `get_order` | `order_id` and `email` | Return matching order status, dates, total, payment method, tracking code, and up to 50 items |
+
+Example from a Python session started in `backend/`, after migrating and importing the database:
+
+```python
+from src.core.config import Settings
+from src.core.database import create_database_engine
+from src.langchain_layer.tools import build_store_tools
+
+engine = create_database_engine(Settings())
+try:
+    tools = {tool.name: tool for tool in build_store_tools(engine)}
+    result = tools["search_products"].invoke({
+        "query": "violao",
+        "max_price_brl": "1000.00",
+        "limit": 5,
+    })
+    print(result)
+finally:
+    engine.dispose()
+```
+
+Search ignores case and common Portuguese accents. User text is a literal substring, including SQL wildcard characters. Results are ordered by current unit price, then product ID; `has_more` indicates when the search can be refined. Availability requires `status=active` and positive stock. Set `only_available=false` to inspect unavailable or discontinued products; their `available` flag remains false.
+
+Prices are BRL decimal strings with two decimal places. The original price and promotion details are returned together. Only positive, active promotions apply. If multiple promotions are active for the same product, select the largest discount, breaking ties by promotion ID; discounts are never stacked. Budget filtering uses exact PostgreSQL numeric arithmetic, and returned prices use Python `Decimal` with half-up rounding. Payment-specific discounts and installment rules require policy retrieval and are deferred to the agent integration stage.
+
+Order email comparison ignores surrounding whitespace and case. A missing order and an incorrect email produce the same `not_found` result. Order responses omit customer identity, email, phone, and internal notes, and do not infer receipt dates or historical item prices from current catalog values. `items_truncated` indicates whether more than 50 items exist.
+
+All lookups run in read-only transactions using fixed SQL and bound parameters. No arbitrary SQL or customer-listing tool is exposed. Invalid arguments are rejected before database access; database failures return a sanitized tool error. There are no additional HTTP endpoints in this stage.
 
 ## Prototype boundaries
 

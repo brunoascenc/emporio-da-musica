@@ -11,7 +11,7 @@ Complete one stage at a time: implement, validate, update documentation, and rep
 | 1. Documentation foundation | Complete | README, architecture, roadmap, backend/frontend scaffolding, and `.gitignore` | Alignment with agreed decisions; no premature implementation |
 | 2. Local infrastructure | Complete | FastAPI, settings, dependencies, backend Dockerfile, and Compose with PostgreSQL/pgvector | Nine automated tests pass, both containers are healthy, and the live health endpoint confirms PostgreSQL and pgvector |
 | 3. Tabular ingestion | Complete | Alembic migration, six tables, validated CSV snapshots, and transactional upsert CLI | 26 tests pass, including isolated PostgreSQL tests for types, relationships, repeated imports, updates, and rollback |
-| 4. SQL tools | Pending | Product, price, promotion, and order lookups | Correct queries and order access checked by number and email |
+| 4. SQL tools | Complete | Read-only catalog, price, promotion, and protected order services with LangChain tool adapters | Validated filters, bounded results, exact prices, active promotions, and order matching by number and email |
 | 5. Vector retrieval | Pending | PDF ingestion, embeddings, and referenced policy search | Relevant sections retrieved; unchanged sources do not trigger new embeddings |
 | 6. Agent | Pending | ReAct, persona, and tool integration | Simple and combined queries, limits, and error handling |
 | 7. Chat and history | Pending | Chat endpoints, sessions, and persistence | Conversations survive restarts and stay isolated by session |
@@ -36,3 +36,12 @@ Tests will accompany features. Stage 9 consolidates evaluation rather than postp
 - The complete suite passes 26 tests, including PostgreSQL tests that use temporary isolated schemas. A simulated failure at the final promotions table verifies that changes to earlier tables are rolled back.
 - Invalid fields, headers, duplicate keys, missing files, and broken references are rejected without exposing source values. Existing records are updated on repeat import without duplicates.
 - No retrieval tools, policy embeddings, model integration, chat, or frontend behavior is implemented in this stage.
+
+## Stage 4 validation
+
+- The complete suite passes 45 tests, including live PostgreSQL integration checks. The rebuilt Docker backend remains healthy, and all four tools were invoked successfully against the project database without model calls.
+- Four tools are available: `list_categories`, `search_products`, `get_product`, and `get_order`. No new HTTP endpoints or model calls are introduced.
+- Unit tests cover argument validation before database access, read-only transactions, parameter binding, wildcard escaping, decimal rounding, and sanitized errors.
+- PostgreSQL tests cover accent-insensitive category/budget search, stock and lifecycle filtering, inactive promotions, selecting one active discount, discounted-price budget boundaries, result limits, literal SQL-like input, and order lookup with matching or incorrect email.
+- Existing migration and ingestion tests continue to cover isolated schemas, data types, upserts, and rollback. All database tests leave operational data untouched.
+- Policy retrieval, payment-policy application, agent orchestration, chat, and frontend implementation remain for later stages.
