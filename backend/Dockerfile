@@ -11,6 +11,10 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && useradd --create-home appuser
 
 COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY migrations/ ./migrations/
+COPY alembic.ini .
+COPY data/ ./data/
 USER appuser
 
 EXPOSE 8000

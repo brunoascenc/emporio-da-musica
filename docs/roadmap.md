@@ -10,7 +10,7 @@ Complete one stage at a time: implement, validate, update documentation, and rep
 | --- | --- | --- | --- |
 | 1. Documentation foundation | Complete | README, architecture, roadmap, backend/frontend scaffolding, and `.gitignore` | Alignment with agreed decisions; no premature implementation |
 | 2. Local infrastructure | Complete | FastAPI, settings, dependencies, backend Dockerfile, and Compose with PostgreSQL/pgvector | Nine automated tests pass, both containers are healthy, and the live health endpoint confirms PostgreSQL and pgvector |
-| 3. Tabular ingestion | Pending | Migrations, six tables, and CSV imports | Correct types, relationships, counts, transactions, and repeatable imports |
+| 3. Tabular ingestion | Complete | Alembic migration, six tables, validated CSV snapshots, and transactional upsert CLI | 26 tests pass, including isolated PostgreSQL tests for types, relationships, repeated imports, updates, and rollback |
 | 4. SQL tools | Pending | Product, price, promotion, and order lookups | Correct queries and order access checked by number and email |
 | 5. Vector retrieval | Pending | PDF ingestion, embeddings, and referenced policy search | Relevant sections retrieved; unchanged sources do not trigger new embeddings |
 | 6. Agent | Pending | ReAct, persona, and tool integration | Simple and combined queries, limits, and error handling |
@@ -27,3 +27,12 @@ Tests will accompany features. Stage 9 consolidates evaluation rather than postp
 - Live Docker verification passes: both images build and both containers become healthy. `GET /api/health` returns HTTP 200 with `{"status":"healthy","database":"up","pgvector":true}`.
 - The earlier Docker engine startup issue cleared after starting Docker Desktop again. An existing host service occupies port 5432, so this project publishes PostgreSQL on configurable host port 5433 while retaining container port 5432.
 - No ingestion, model integration, chat, or frontend behavior has been implemented in this stage.
+
+## Stage 3 validation
+
+- The source CSVs are copied unchanged into `backend/data/`.
+- Alembic creates the six tables with explicit types, keys, foreign keys, indexes, and checks. Applying the migration twice succeeds.
+- Both initial and repeated imports succeed in Docker, processing 9 categories, 50 customers, 65 products, 20 orders, 22 order items, and 25 promotions.
+- The complete suite passes 26 tests, including PostgreSQL tests that use temporary isolated schemas. A simulated failure at the final promotions table verifies that changes to earlier tables are rolled back.
+- Invalid fields, headers, duplicate keys, missing files, and broken references are rejected without exposing source values. Existing records are updated on repeat import without duplicates.
+- No retrieval tools, policy embeddings, model integration, chat, or frontend behavior is implemented in this stage.

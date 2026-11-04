@@ -1,6 +1,6 @@
 # Architecture and decisions
 
-Status: backend infrastructure is implemented and validated in Docker. Agent, ingestion, chat, and frontend features remain planned.
+Status: backend infrastructure, operational migrations, and CSV ingestion are implemented and validated against PostgreSQL. Agent, policy retrieval, chat, and frontend features remain planned.
 
 ## Responsibilities
 
@@ -68,11 +68,15 @@ features/chat/
 
 Each CSV maps to a table named after its filename without the extension. Schemas will explicitly reflect headers and contents, with validated keys and relationships.
 
+The initial Alembic migration creates all six tables. Source identifiers are externally assigned integer primary keys, with `(order_id, product_id)` as the composite key for `order_items`. Foreign keys connect products to categories, orders to customers, items to orders and products, and promotions to products. Foreign key lookup columns are indexed. Database constraints enforce nonnegative money and stock, positive quantities, valid statuses, object-shaped specifications, and discount percentages between 0 and 100.
+
 - Money uses decimal types rather than floating-point arithmetic.
 - Dates use appropriate date types; `products.specs` uses JSONB.
 - Imports are transactional and repeatable without duplication. Inconsistencies produce diagnostics rather than silent corrections.
 - Product and order tools use parameterized queries with bounded results. The agent has no arbitrary SQL tool or general customer listing tool.
 - The backend validates the order number and matching email before returning information. Logs must not record these personal identifiers.
+
+CSV parsing and validation live in `backend/src/services/ingestion.py` and `ingestion_schemas.py`; `backend/scripts/import_data.py` exposes the explicit CLI command. The six original CSVs are included under `backend/data/`. All files are validated before writes, including duplicate keys and references within the supplied snapshot. A single transaction performs PostgreSQL upserts in dependency order. Existing keys are updated, absent keys are retained, and any database failure rolls back every table. Diagnostics identify the file, record, and invalid fields without exposing field values. The JSON success report counts processed source rows rather than new inserts.
 
 ## Policy retrieval
 
@@ -112,7 +116,7 @@ The backend generates UUIDs for new sessions and persists history in PostgreSQL.
 
 ## Configuration and operation
 
-Docker Compose currently defines PostgreSQL with pgvector and the FastAPI backend, using a persistent database volume. The frontend service will be added with the interface implementation. A first-volume initialization script enables the vector extension; application startup does not create tables or ingest data. Migrations and ingestion will be explicit documented commands. Normal startup must not repeat ingestion or embedding calls.
+Docker Compose currently defines PostgreSQL with pgvector and the FastAPI backend, using a persistent database volume. The frontend service will be added with the interface implementation. A first-volume initialization script enables the vector extension; application startup does not create tables or ingest data. Alembic migrations and CSV ingestion are explicit documented commands. Normal startup must not repeat ingestion or embedding calls.
 
 The implemented health endpoint checks PostgreSQL connectivity and whether the vector extension is installed. It returns HTTP 200 for healthy dependencies and HTTP 503 for connection failures or a missing extension, without returning database exception details. Settings are validated on startup, the SQLAlchemy pool uses connection pre-ping and bounded timeouts, and shutdown disposes the engine. OpenAI configuration is deferred to the model integration stage.
 
