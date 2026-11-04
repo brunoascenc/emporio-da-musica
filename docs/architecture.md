@@ -1,6 +1,6 @@
 # Architecture and decisions
 
-Status: approved design for sequential implementation; features are not implemented yet.
+Status: backend infrastructure is implemented and validated in Docker. Agent, ingestion, chat, and frontend features remain planned.
 
 ## Responsibilities
 
@@ -13,7 +13,7 @@ All paths below are relative to `backend/` unless otherwise stated. They describ
 | `src/core/database.py` | Manage the database engine, connections, and sessions |
 | `src/core/llm.py` | Initialize configurable OpenAI models |
 | `src/api/schemas.py` | Validate HTTP request and response contracts |
-| `src/api/v1/` | Declare endpoints and assemble the versioned router |
+| `src/api/` | Declare endpoints and assemble the API router |
 | `src/services/workflow.py` | Coordinate history, agent execution, and API results |
 | `src/langchain_layer/agent.py` | Define the ReAct loop and register tools |
 | `src/langchain_layer/prompts.py` | Define persona, scope, and source-use instructions |
@@ -95,9 +95,9 @@ Retrieval initially returns four similar chunks and may include adjacent section
 
 | Method and route | Minimum contract |
 | --- | --- |
-| `GET /api/v1/health` | Check application and database availability without a paid model call |
-| `POST /api/v1/chat` | Accept a message and optional session UUID; return the session UUID, answer, and references |
-| `GET /api/v1/conversations/{session_id}` | Return the ordered history of an existing session |
+| `GET /api/health` | Check application and database availability without a paid model call |
+| `POST /api/chat` | Accept a message and optional session UUID; return the session UUID, answer, and references |
+| `GET /api/conversations/{session_id}` | Return the ordered history of an existing session |
 
 The backend generates UUIDs for new sessions and persists history in PostgreSQL. The browser stores the session identifier to restore conversations. The first version returns complete responses without streaming. No additional `/query` endpoint is planned without a functional need.
 
@@ -112,6 +112,8 @@ The backend generates UUIDs for new sessions and persists history in PostgreSQL.
 
 ## Configuration and operation
 
-Docker Compose will run PostgreSQL with pgvector, the backend, and the frontend, using a persistent database volume. Migrations and ingestion are explicit documented commands. Normal startup must not repeat ingestion or embedding calls.
+Docker Compose currently defines PostgreSQL with pgvector and the FastAPI backend, using a persistent database volume. The frontend service will be added with the interface implementation. A first-volume initialization script enables the vector extension; application startup does not create tables or ingest data. Migrations and ingestion will be explicit documented commands. Normal startup must not repeat ingestion or embedding calls.
+
+The implemented health endpoint checks PostgreSQL connectivity and whether the vector extension is installed. It returns HTTP 200 for healthy dependencies and HTTP 503 for connection failures or a missing extension, without returning database exception details. Settings are validated on startup, the SQLAlchemy pool uses connection pre-ping and bounded timeouts, and shutdown disposes the engine. OpenAI configuration is deferred to the model integration stage.
 
 Only configuration examples are versioned; actual environment files and credentials are excluded. Dependency versions will be pinned as components are implemented. Automated tests use simulated OpenAI responses; live evaluation is separate.
